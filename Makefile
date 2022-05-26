@@ -52,6 +52,7 @@ IMG ?= controller:latest
 ENVTEST_K8S_VERSION = 1.23
 
 CERT_MANAGER_VERSION = v1.8.0
+PWD=$(shell pwd)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -122,7 +123,18 @@ endif
 ifeq (, $(shell which mockgen))
 	(cd /tmp/ && go install github.com/golang/mock/mockgen@v1.6.0)
 endif
+ifeq (, $(shell which oapi-codegen))
+	(cd /tmp/ && go install github.com/deepmap/oapi-codegen/cmd/oapi-codegen@latest)
+endif
 	@exit
+
+.PHONY: generate-oapi
+generate-oapi:
+	mkdir -p restapi
+	# using --old-style-config flag in order to seperate the generate for each type (types, server, and client files)
+	oapi-codegen -generate types -old-config-style -package restapi  osbuildconfig_webhook_trigger.yaml > restapi/osbuildconfig_webhook_trigger_types.go
+	oapi-codegen -generate chi-server -old-config-style -package restapi  osbuildconfig_webhook_trigger.yaml > restapi/osbuildconfig_webhook_trigger_server.go
+	oapi-codegen -generate client -old-config-style -package restapi  osbuildconfig_webhook_trigger.yaml > restapi/osbuildconfig_webhook_trigger_client.go
 
 .PHONY: generate
 generate: generate-tools controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
