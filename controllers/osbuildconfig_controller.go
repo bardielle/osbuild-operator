@@ -18,16 +18,14 @@ package controllers
 
 import (
 	"context"
-	"github.com/go-logr/logr"
 	osbuilderprojectflottaiov1alpha1 "github.com/project-flotta/osbuild-operator/api/v1alpha1"
+	"github.com/project-flotta/osbuild-operator/internal/manifests"
 	"github.com/project-flotta/osbuild-operator/internal/repository/osbuild"
 	"github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfig"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -37,6 +35,7 @@ type OSBuildConfigReconciler struct {
 	Scheme                  *runtime.Scheme
 	OSBuildConfigRepository osbuildconfig.Repository
 	OSBuildRepository       osbuild.Repository
+	OSBuildCRCreator        manifests.OSBuildCRCreatorInterface
 }
 
 //+kubebuilder:rbac:groups=osbuilder.project-flotta.io,resources=osbuildconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -70,53 +69,12 @@ func (r *OSBuildConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	err = r.createNewOSBuildCR(ctx, osBuildConfig, logger)
+	err = r.OSBuildCRCreator.CreateNewOSBuildCR(ctx, osBuildConfig, logger, r.OSBuildConfigRepository, r.OSBuildRepository, r.Scheme)
 	if err != nil {
 		return ctrl.Result{Requeue: true}, err
 	}
 
 	return ctrl.Result{}, nil
-}
-
-func (r *OSBuildConfigReconciler) createNewOSBuildCR(ctx context.Context, osBuildConfig *osbuilderprojectflottaiov1alpha1.OSBuildConfig, logger logr.Logger) error {
-	osBuildNewVersion := *osBuildConfig.Status.LastVersion + 1
-
-	osBuildConfigSpecDetails := osBuildConfig.Spec.Details.DeepCopy()
-	osBuild := &osbuilderprojectflottaiov1alpha1.OSBuild{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: osBuildConfig.Name + "-" + string(rune(osBuildNewVersion)),
-		},
-		Spec: osbuilderprojectflottaiov1alpha1.OSBuildSpec{
-			Details:     *osBuildConfigSpecDetails,
-			TriggeredBy: "UpdateCR",
-		},
-	}
-
-	// Set the owner of the osBuild CR to be osBuildConfig in order to manage lifecycle of the osBuild CR.
-	// Especially in deletion of osBuildConfig CR
-	err := controllerutil.SetControllerReference(osBuildConfig, osBuild, r.Scheme)
-	if err != nil {
-		logger.Error(err, "cannot create osBuild")
-		return err
-	}
-
-	patch := client.MergeFrom(osBuildConfig.DeepCopy())
-	osBuildConfig.Status.LastVersion = &osBuildNewVersion
-	err = r.OSBuildConfigRepository.PatchStatus(ctx, osBuildConfig, &patch)
-	if err != nil {
-		logger.Error(err, "cannot update the field lastVersion of osBuildConfig")
-		return err
-	}
-
-	err = r.OSBuildRepository.Create(ctx, osBuild)
-	if err != nil {
-		logger.Error(err, "cannot create osBuild")
-		return err
-	}
-
-	logger.Info("A new OSBuild CR was created", osBuild.Name)
-
-	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

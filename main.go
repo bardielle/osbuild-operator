@@ -18,10 +18,12 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"github.com/project-flotta/osbuild-operator/internal/manifests"
+	"github.com/project-flotta/osbuild-operator/restapi"
+	"log"
+	"net/http"
 	"os"
-
-	"github.com/project-flotta/osbuild-operator/internal/repository/osbuild"
-	"github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfig"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -36,12 +38,20 @@ import (
 
 	osbuilderprojectflottaiov1alpha1 "github.com/project-flotta/osbuild-operator/api/v1alpha1"
 	"github.com/project-flotta/osbuild-operator/controllers"
+	internalosbuildconfig "github.com/project-flotta/osbuild-operator/internal/osbuildconfig"
+	"github.com/project-flotta/osbuild-operator/internal/repository/osbuild"
+	"github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfig"
+	repositorysecret "github.com/project-flotta/osbuild-operator/internal/repository/secret"
 	//+kubebuilder:scaffold:imports
 )
 
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+)
+
+const (
+	Port = 8888
 )
 
 var Config struct {
@@ -89,12 +99,14 @@ func main() {
 
 	OSBuildConfigRepository := osbuildconfig.NewOSBuildConfigRepository(mgr.GetClient())
 	OSBuildRepository := osbuild.NewOSBuildRepository(mgr.GetClient())
-
+	SecretRepository := repositorysecret.NewSecretRepository(mgr.GetClient())
+	OSBuildCRCreator := manifests.NewOSBuildCRCreator()
 	if err = (&controllers.OSBuildConfigReconciler{
 		Client:                  mgr.GetClient(),
 		Scheme:                  mgr.GetScheme(),
 		OSBuildConfigRepository: OSBuildConfigRepository,
 		OSBuildRepository:       OSBuildRepository,
+		OSBuildCRCreator:        OSBuildCRCreator,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "OSBuildConfig")
 		os.Exit(1)
@@ -138,4 +150,15 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+
+	go func() {
+		h := restapi.Handler(internalosbuildconfig.NewOSBuildConfigHandler(OSBuildConfigRepository, OSBuildRepository, SecretRepository, mgr.GetScheme(), OSBuildCRCreator))
+
+		if err != nil {
+			setupLog.Error(err, "cannot start http server")
+		}
+		address := fmt.Sprintf(":%v", Port)
+		setupLog.Info("starting http server", "address", address)
+		log.Fatal(http.ListenAndServe(address, h))
+	}()
 }
