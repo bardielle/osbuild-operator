@@ -88,12 +88,12 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
-	// OSBuildConfigWebhookTriggers request
-	OSBuildConfigWebhookTriggers(ctx context.Context, namespace string, name string, secret string, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// TriggerBuild request
+	TriggerBuild(ctx context.Context, namespace string, name string, params *TriggerBuildParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
-func (c *Client) OSBuildConfigWebhookTriggers(ctx context.Context, namespace string, name string, secret string, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewOSBuildConfigWebhookTriggersRequest(c.Server, namespace, name, secret)
+func (c *Client) TriggerBuild(ctx context.Context, namespace string, name string, params *TriggerBuildParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewTriggerBuildRequest(c.Server, namespace, name, params)
 	if err != nil {
 		return nil, err
 	}
@@ -104,8 +104,8 @@ func (c *Client) OSBuildConfigWebhookTriggers(ctx context.Context, namespace str
 	return c.Client.Do(req)
 }
 
-// NewOSBuildConfigWebhookTriggersRequest generates requests for OSBuildConfigWebhookTriggers
-func NewOSBuildConfigWebhookTriggersRequest(server string, namespace string, name string, secret string) (*http.Request, error) {
+// NewTriggerBuildRequest generates requests for TriggerBuild
+func NewTriggerBuildRequest(server string, namespace string, name string, params *TriggerBuildParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -122,19 +122,12 @@ func NewOSBuildConfigWebhookTriggersRequest(server string, namespace string, nam
 		return nil, err
 	}
 
-	var pathParam2 string
-
-	pathParam2, err = runtime.StyleParamWithLocation("simple", false, "secret", runtime.ParamLocationPath, secret)
-	if err != nil {
-		return nil, err
-	}
-
 	serverURL, err := url.Parse(server)
 	if err != nil {
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/namespaces/%s/osbuildconfig/%s/webhooks/%s/generic", pathParam0, pathParam1, pathParam2)
+	operationPath := fmt.Sprintf("/api/osbuild/v1/namespaces/%s/osbuildconfig/%s/webhooks", pathParam0, pathParam1)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -148,6 +141,15 @@ func NewOSBuildConfigWebhookTriggersRequest(server string, namespace string, nam
 	if err != nil {
 		return nil, err
 	}
+
+	var headerParam0 string
+
+	headerParam0, err = runtime.StyleParamWithLocation("simple", false, "secret", runtime.ParamLocationHeader, params.Secret)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("secret", headerParam0)
 
 	return req, nil
 }
@@ -195,18 +197,18 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
-	// OSBuildConfigWebhookTriggers request
-	OSBuildConfigWebhookTriggersWithResponse(ctx context.Context, namespace string, name string, secret string, reqEditors ...RequestEditorFn) (*OSBuildConfigWebhookTriggersResponse, error)
+	// TriggerBuild request
+	TriggerBuildWithResponse(ctx context.Context, namespace string, name string, params *TriggerBuildParams, reqEditors ...RequestEditorFn) (*TriggerBuildResponse, error)
 }
 
-type OSBuildConfigWebhookTriggersResponse struct {
+type TriggerBuildResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *MessageResponse
 }
 
 // Status returns HTTPResponse.Status
-func (r OSBuildConfigWebhookTriggersResponse) Status() string {
+func (r TriggerBuildResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -214,31 +216,31 @@ func (r OSBuildConfigWebhookTriggersResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r OSBuildConfigWebhookTriggersResponse) StatusCode() int {
+func (r TriggerBuildResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
 	return 0
 }
 
-// OSBuildConfigWebhookTriggersWithResponse request returning *OSBuildConfigWebhookTriggersResponse
-func (c *ClientWithResponses) OSBuildConfigWebhookTriggersWithResponse(ctx context.Context, namespace string, name string, secret string, reqEditors ...RequestEditorFn) (*OSBuildConfigWebhookTriggersResponse, error) {
-	rsp, err := c.OSBuildConfigWebhookTriggers(ctx, namespace, name, secret, reqEditors...)
+// TriggerBuildWithResponse request returning *TriggerBuildResponse
+func (c *ClientWithResponses) TriggerBuildWithResponse(ctx context.Context, namespace string, name string, params *TriggerBuildParams, reqEditors ...RequestEditorFn) (*TriggerBuildResponse, error) {
+	rsp, err := c.TriggerBuild(ctx, namespace, name, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseOSBuildConfigWebhookTriggersResponse(rsp)
+	return ParseTriggerBuildResponse(rsp)
 }
 
-// ParseOSBuildConfigWebhookTriggersResponse parses an HTTP response from a OSBuildConfigWebhookTriggersWithResponse call
-func ParseOSBuildConfigWebhookTriggersResponse(rsp *http.Response) (*OSBuildConfigWebhookTriggersResponse, error) {
+// ParseTriggerBuildResponse parses an HTTP response from a TriggerBuildWithResponse call
+func ParseTriggerBuildResponse(rsp *http.Response) (*TriggerBuildResponse, error) {
 	bodyBytes, err := ioutil.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &OSBuildConfigWebhookTriggersResponse{
+	response := &TriggerBuildResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

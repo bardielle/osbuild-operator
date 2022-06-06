@@ -10,3 +10,9 @@ type MessageResponse struct {
 	Directive *string      `json:"directive,omitempty"`
 	MessageId *string      `json:"message_id,omitempty"`
 }
+
+// TriggerBuildParams defines parameters for TriggerBuild.
+type TriggerBuildParams struct {
+	// The secret value of the secret with a key named WebHookSecretKey that the webhook definition reference to. The secret ensures the uniqueness of the URL, preventing others from triggering the build
+	Secret string `json:"secret"`
+}

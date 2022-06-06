@@ -14,8 +14,8 @@ import (
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 
-	// (POST /namespaces/{namespace}/osbuildconfig/{name}/webhooks/{secret}/generic)
-	OSBuildConfigWebhookTriggers(w http.ResponseWriter, r *http.Request, namespace string, name string, secret string)
+	// (POST /api/osbuild/v1/namespaces/{namespace}/osbuildconfig/{name}/webhooks)
+	TriggerBuild(w http.ResponseWriter, r *http.Request, namespace string, name string, params TriggerBuildParams)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -27,8 +27,8 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.HandlerFunc) http.HandlerFunc
 
-// OSBuildConfigWebhookTriggers operation middleware
-func (siw *ServerInterfaceWrapper) OSBuildConfigWebhookTriggers(w http.ResponseWriter, r *http.Request) {
+// TriggerBuild operation middleware
+func (siw *ServerInterfaceWrapper) TriggerBuild(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	var err error
@@ -51,17 +51,36 @@ func (siw *ServerInterfaceWrapper) OSBuildConfigWebhookTriggers(w http.ResponseW
 		return
 	}
 
-	// ------------- Path parameter "secret" -------------
-	var secret string
+	// Parameter object where we will unmarshal all parameters from the context
+	var params TriggerBuildParams
 
-	err = runtime.BindStyledParameter("simple", false, "secret", chi.URLParam(r, "secret"), &secret)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "secret", Err: err})
+	headers := r.Header
+
+	// ------------- Required header parameter "secret" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("secret")]; found {
+		var Secret string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "secret", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithLocation("simple", false, "secret", runtime.ParamLocationHeader, valueList[0], &Secret)
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "secret", Err: err})
+			return
+		}
+
+		params.Secret = Secret
+
+	} else {
+		err := fmt.Errorf("Header parameter secret is required, but not found")
+		siw.ErrorHandlerFunc(w, r, &RequiredHeaderError{ParamName: "secret", Err: err})
 		return
 	}
 
 	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.OSBuildConfigWebhookTriggers(w, r, namespace, name, secret)
+		siw.Handler.TriggerBuild(w, r, namespace, name, params)
 	}
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -185,7 +204,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/namespaces/{namespace}/osbuildconfig/{name}/webhooks/{secret}/generic", wrapper.OSBuildConfigWebhookTriggers)
+		r.Post(options.BaseURL+"/api/osbuild/v1/namespaces/{namespace}/osbuildconfig/{name}/webhooks", wrapper.TriggerBuild)
 	})
 
 	return r

@@ -14,10 +14,10 @@ tags:
   - name: osbuilconfig
     description: OSBuildConfig CRD
 paths:
-  "/namespaces/{namespace}/osbuildconfig/{name}/webhooks/{secret}/generic":
+  "/api/osbuild/v1/namespaces/{namespace}/osbuildconfig/{name}/webhooks":
     post:
       description: Triggering webhook builds for OSBuildConfig CRs
-      operationId: OSBuildConfigWebhookTriggers
+      operationId: TriggerBuild
       tags:
         - osbuilconfig
       parameters:
@@ -33,9 +33,9 @@ paths:
           required: true
           schema:
             type: string
-        - in: path
+        - in: header
           name: secret
-          description: secret name
+          description: The secret value of the secret with a key named WebHookSecretKey that the webhook definition reference to. The secret ensures the uniqueness of the URL, preventing others from triggering the build
           required: true
           schema:
             type: string
@@ -58,8 +58,6 @@ paths:
           description: Error
         "500":
           description: Error
-servers:
-  - url: /api/osbuild/v1
 components:
   securitySchemes:
     agentAuth:

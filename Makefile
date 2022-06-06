@@ -52,7 +52,6 @@ IMG ?= controller:latest
 ENVTEST_K8S_VERSION = 1.23
 
 CERT_MANAGER_VERSION = v1.8.0
-PWD=$(shell pwd)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -137,7 +136,7 @@ generate-oapi:
 	oapi-codegen -generate client -old-config-style -package restapi  osbuildconfig_webhook_trigger.yaml > restapi/osbuildconfig_webhook_trigger_client.go
 
 .PHONY: generate
-generate: generate-tools controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+generate: generate-tools controller-gen generate-oapi ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 	go generate ./...
 
@@ -201,6 +200,7 @@ build-iso: ## build fake iso
 .PHONY: build
 build: generate fmt vet ## Build manager binary.
 	go build -mod=vendor -o bin/manager main.go
+	go build -mod=vendor -o bin/httpapi ./cmd/httpapi/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -236,6 +236,7 @@ install-cert-manager: cmctl
 .PHONY: deploy
 deploy: manifests kustomize install-cert-manager ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	cd config/httpapi && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default | $(CLUSTER_RUNTIME) apply -f -
 
 .PHONY: undeploy
