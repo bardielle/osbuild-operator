@@ -37,13 +37,16 @@ func (o *OSBuildConfigHandler) OSBuildConfigWebhookTriggers(w http.ResponseWrite
 	if err != nil {
 		if errors.IsNotFound(err) {
 			w.WriteHeader(http.StatusNotFound)
+			return
 		}
 		logger.Error(err, "can't read OSBuildConfigCR")
 		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
 	if osBuildConfig.Spec.Triggers.WebHook == nil {
 		w.WriteHeader(http.StatusBadRequest)
+		return
 	}
 
 	secretName := osBuildConfig.Spec.Triggers.WebHook.SecretReference.Name
@@ -52,18 +55,24 @@ func (o *OSBuildConfigHandler) OSBuildConfigWebhookTriggers(w http.ResponseWrite
 	if err != nil {
 		if errors.IsNotFound(err) {
 			w.WriteHeader(http.StatusNotFound)
+			return
 		}
 		logger.Error(err, "can't read secret")
 		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
 	if string(webhookSecret.Data["WebHookSecretKey"]) != secretVal {
 		w.WriteHeader(http.StatusForbidden)
+		return
 	}
 
 	err = o.OSBuildCRCreator.CreateNewOSBuildCR(r.Context(), osBuildConfig, logger, o.OSBuildConfigRepository, o.OSBuildRepository, o.Scheme)
 	if err != nil {
 		logger.Error(err, "can't create new OSBuild CR")
 		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
+
+	w.WriteHeader(http.StatusOK)
 }
