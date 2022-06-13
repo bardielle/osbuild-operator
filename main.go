@@ -18,8 +18,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"io/ioutil"
+	"net/http"
 	"os"
-
+	"path"
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -37,6 +42,7 @@ import (
 
 	"github.com/project-flotta/osbuild-operator/api/v1alpha1"
 	"github.com/project-flotta/osbuild-operator/controllers"
+	"github.com/project-flotta/osbuild-operator/internal/composer"
 	"github.com/project-flotta/osbuild-operator/internal/conf"
 	"github.com/project-flotta/osbuild-operator/internal/indexer"
 	"github.com/project-flotta/osbuild-operator/internal/manifests"
@@ -52,6 +58,10 @@ import (
 	"github.com/project-flotta/osbuild-operator/internal/repository/service"
 	"github.com/project-flotta/osbuild-operator/internal/repository/virtualmachine"
 	//+kubebuilder:scaffold:imports
+)
+
+const (
+	osBuildCertsDir = "/etc/osbuild/certs"
 )
 
 var (
@@ -141,9 +151,23 @@ func main() {
 		}
 	}
 
+	setupLog.Info("Create a composer client")
+	httpClient, err := createClient()
+	if err != nil {
+		setupLog.Error(err, "unable to create http client")
+		os.Exit(1)
+	}
+
+	composerClient := composer.Client{
+		Server:         fmt.Sprintf("https://%s/api/image-builder-composer/v2/", controllers.ComposerComposerAPIServiceName),
+		Client:         httpClient,
+		RequestEditors: nil,
+	}
+
 	if err = (&controllers.OSBuildReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Scheme:            mgr.GetScheme(),
+		OSBuildRepository: osBuildRepository,
+		ComposerClient:    &composerClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "OSBuild")
 		os.Exit(1)
@@ -193,4 +217,33 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func createClient() (*http.Client, error) {
+	ca := path.Join(osBuildCertsDir, "ca.crt")
+	tlsCert := path.Join(osBuildCertsDir, "tls.crt")
+	tlsKey := path.Join(osBuildCertsDir, "tls.key")
+	var tlsConfig *tls.Config
+
+	caCert, err := ioutil.ReadFile(ca)
+	if err != nil {
+		return nil, err
+	}
+
+	cert, err := tls.LoadX509KeyPair(tlsCert, tlsKey)
+	if err != nil {
+		return nil, err
+	}
+
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	tlsConfig = &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		RootCAs:      caCertPool,
+		Certificates: []tls.Certificate{cert},
+	}
+
+	transport := &http.Transport{TLSClientConfig: tlsConfig}
+	return &http.Client{Transport: transport}, nil
 }
