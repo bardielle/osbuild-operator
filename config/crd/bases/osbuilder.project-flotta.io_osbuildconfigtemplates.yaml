@@ -71,11 +71,11 @@ spec:
                           items:
                             type: string
                           type: array
+                        key:
+                          description: Key is the user's SSH public key (optional)
+                          type: string
                         name:
                           description: Name is the username for the new user
-                          type: string
-                        pubKey:
-                          description: Key is the user's SSH public key (optional)
                           type: string
                       required:
                       - name

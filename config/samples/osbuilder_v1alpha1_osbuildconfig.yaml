@@ -15,11 +15,6 @@ spec:
       osTree:
         url: "https://hostedimagesserver.flotta.io/"
         ref: "rhel/8/x86_64/edge"
-  template:
-    osBuildConfigTemplateRef: osbuildconfigtemplate-sample
-    parameters:
-      - name: foo
-        value: bar
   triggers:
     configChange: true
     webHook:

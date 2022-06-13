@@ -196,7 +196,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./main.go
 
 .PHONY: docker-build
-docker-build: test ## Build docker image with the manager.
+docker-build:  ## Build docker image with the manager.
 	$(CONTAINER_RUNTIME) build -t ${IMG} .
 
 .PHONY: docker-push
@@ -223,7 +223,8 @@ install-cert-manager: cmctl
 	${CMCTL} check api --wait=5m
 
 .PHONY: deploy
-deploy: manifests kustomize install-cert-manager ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+#deploy: manifests kustomize install-cert-manager## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	cd config/httpapi && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default | $(CLUSTER_RUNTIME) apply -f -
@@ -231,7 +232,7 @@ deploy: manifests kustomize install-cert-manager ## Deploy controller to the K8s
 .PHONY: undeploy
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(CLUSTER_RUNTIME) delete --ignore-not-found=$(ignore-not-found) -f -
-	${CLUSTER_RUNTIME} delete --ignore-not-found=$(ignore-not-found) -f https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml
+	#${CLUSTER_RUNTIME} delete --ignore-not-found=$(ignore-not-found) -f https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml
 
 CONTROLLER_GEN = $(shell pwd)/bin/controller-gen
 .PHONY: controller-gen

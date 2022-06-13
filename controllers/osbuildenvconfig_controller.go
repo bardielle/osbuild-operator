@@ -90,6 +90,8 @@ const (
 	envoyProxyCertsDir = "/etc/certs"
 )
 
+var GlobalComposerComposerAPIServiceName = composerComposerAPIServiceName
+
 // composerDeploymentParameters includes all the parameters needed to render the Composer Proxy Config and Deployment
 type composerDeploymentParameters struct {
 	ComposerDeploymentNamespace      string
@@ -196,7 +198,7 @@ func (r *OSBuildEnvConfigReconciler) Update(ctx context.Context, reqLogger logr.
 		instance,
 		composerCertificateName,
 		[]string{
-			composerComposerAPIServiceName,
+			GlobalComposerComposerAPIServiceName,
 			composerWorkerAPIServiceName,
 		},
 	)
@@ -449,7 +451,7 @@ func (r *OSBuildEnvConfigReconciler) generateComposerDeployment(composerDeployme
 }
 
 func (r *OSBuildEnvConfigReconciler) ensureComposerComposerAPIServiceExists(ctx context.Context, instance *osbuildv1alpha1.OSBuildEnvConfig, composerDeploymentParams *composerDeploymentParameters) (bool, error) {
-	return r.ensureComposerServiceExists(ctx, composerComposerAPIServiceName, composerComposerAPIPortName, composerDeploymentParams.ComposerAPIExternalPort, instance)
+	return r.ensureComposerServiceExists(ctx, GlobalComposerComposerAPIServiceName, composerComposerAPIPortName, composerDeploymentParams.ComposerAPIExternalPort, instance)
 }
 
 func (r *OSBuildEnvConfigReconciler) ensureComposerWorkerAPIServiceExists(ctx context.Context, instance *osbuildv1alpha1.OSBuildEnvConfig, composerDeploymentParams *composerDeploymentParameters) (bool, error) {

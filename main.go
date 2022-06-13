@@ -18,7 +18,14 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"github.com/project-flotta/osbuild-operator/internal/composer"
+	"io/ioutil"
+	"net/http"
 	"os"
+	"path/filepath"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -134,9 +141,25 @@ func main() {
 		}
 	}
 
+	setupLog.Info("************* MAIN 1")
+	setupLog.Info("Create a composer client")
+	httpClient, err := createClient()
+	if err != nil {
+		setupLog.Error(err, "unable to create http client")
+		os.Exit(1)
+	}
+
+	composerClient := composer.Client{
+		Server:         fmt.Sprintf("https://%s/api/image-builder-composer/v2/", controllers.GlobalComposerComposerAPIServiceName),
+		Client:         httpClient,
+		RequestEditors: nil,
+	}
+
 	if err = (&controllers.OSBuildReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		OSBuildRepository: osBuildRepository,
+		ComposerClient:    &composerClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "OSBuild")
 		os.Exit(1)
@@ -184,4 +207,35 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func createClient() (*http.Client, error) {
+	certDirFormat := "/etc/osbuild/certs/%s"
+	ca := fmt.Sprintf(certDirFormat, "ca.crt")
+	tlsCert := fmt.Sprintf(certDirFormat, "tls.crt")
+	tlsKey := fmt.Sprintf(certDirFormat, "tls.key")
+	var tlsConfig *tls.Config
+
+	caCert, err := ioutil.ReadFile(filepath.Clean(ca))
+	if err != nil {
+		return nil, err
+	}
+
+	cert, err := tls.LoadX509KeyPair(tlsCert, tlsKey)
+	if err != nil {
+		return nil, err
+	}
+
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+
+	tlsConfig = &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		RootCAs:      caCertPool,
+		Certificates: []tls.Certificate{cert},
+	}
+
+	tlsConfig.BuildNameToCertificate()
+	transport := &http.Transport{TLSClientConfig: tlsConfig}
+	return &http.Client{Transport: transport}, nil
 }

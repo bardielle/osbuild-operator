@@ -51,12 +51,19 @@ type OSBuildStatus struct {
 
 	// +optional
 	Output *string `json:"output,omitempty"`
+
+	// ComposeId presents compose id that was already started, for tracking a job that was started
+	// +optional
+	ContainerComposeId string `json:"containerComposeId,omitempty"`
+
+	// ComposeId presents compose id that was already started, for tracking a job that was started
+	// +optional
+	IsoComposeId string `json:"isoComposeId,omitempty"`
 }
 
 type OSBuildCondition struct {
 	// Type of status
-	// +kubebuilder:validation:Enum=started;failed;pending;finished
-	// +kubebuilder:default=pending
+	// +kubebuilder:validation:Enum=startedContainerBuild;failedContainerBuild;containerBuildDone;startedIsoBuild;failedIsoBuild;isoBuildDone;
 	Type OSBuildConditionType `json:"type" description:"type of OSBuildCondition condition"`
 
 	// Status of the condition, one of True, False, Unknown
