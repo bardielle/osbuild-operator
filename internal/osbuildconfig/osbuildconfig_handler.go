@@ -2,46 +2,45 @@ package osbuildconfig
 
 import (
 	"fmt"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/project-flotta/osbuild-operator/internal/httpapi"
 	"github.com/project-flotta/osbuild-operator/internal/repository/configmap"
 	"github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfigtemplate"
 	"net/http"
 
 	loggerutil "github.com/project-flotta/osbuild-operator/internal/logger"
 	"github.com/project-flotta/osbuild-operator/internal/manifests"
-	repositoryosbuild "github.com/project-flotta/osbuild-operator/internal/repository/osbuild"
 	repositoryosbuildconfig "github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfig"
 	"github.com/project-flotta/osbuild-operator/internal/repository/secret"
 	"github.com/project-flotta/osbuild-operator/restapi"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime"
 )
+
+var Config httpapi.Config
 
 type OSBuildConfigHandler struct {
 	OSBuildConfigRepository         repositoryosbuildconfig.Repository
 	SecretRepository                secret.Repository
-	OSBuildRepository               repositoryosbuild.Repository
-	Scheme                          *runtime.Scheme
 	OSBuildCRCreator                manifests.OSBuildCRCreator
 	OSBuildConfigTemplateRepository osbuildconfigtemplate.Repository
 	ConfigMapRepository             configmap.Repository
 }
 
 func NewOSBuildConfigHandler(osBuildConfigRepository repositoryosbuildconfig.Repository,
-	osBuildRepository repositoryosbuild.Repository, secretRepository secret.Repository, scheme *runtime.Scheme,
-	osBuildCRCreator manifests.OSBuildCRCreator, osBuildConfigTemplateRepository osbuildconfigtemplate.Repository,
-	configMapRepository configmap.Repository) *OSBuildConfigHandler {
+	secretRepository secret.Repository, osBuildCRCreator manifests.OSBuildCRCreator) *OSBuildConfigHandler {
+	err := envconfig.Process("", &Config)
+	if err != nil {
+		panic(err.Error())
+	}
+
 	return &OSBuildConfigHandler{
-		OSBuildConfigRepository:         osBuildConfigRepository,
-		OSBuildRepository:               osBuildRepository,
-		SecretRepository:                secretRepository,
-		Scheme:                          scheme,
-		OSBuildCRCreator:                osBuildCRCreator,
-		ConfigMapRepository:             configMapRepository,
-		OSBuildConfigTemplateRepository: osBuildConfigTemplateRepository,
+		OSBuildConfigRepository: osBuildConfigRepository,
+		SecretRepository:        secretRepository,
+		OSBuildCRCreator:        osBuildCRCreator,
 	}
 }
 func (o *OSBuildConfigHandler) TriggerBuild(w http.ResponseWriter, r *http.Request, namespace string, name string, params restapi.TriggerBuildParams) {
-	err, logger := loggerutil.Logger()
+	err, logger := loggerutil.Logger(Config.LogLevel)
 	if err != nil {
 		return
 	}
@@ -86,8 +85,7 @@ func (o *OSBuildConfigHandler) TriggerBuild(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	err = o.OSBuildCRCreator.Create(r.Context(), osBuildConfig, o.OSBuildConfigRepository, o.OSBuildRepository,
-		o.OSBuildConfigTemplateRepository, o.ConfigMapRepository, o.Scheme)
+	err = o.OSBuildCRCreator.Create(r.Context(), osBuildConfig)
 	if err != nil {
 		logger.Error(err, "cannot create new OSBuild CR")
 		w.WriteHeader(http.StatusInternalServerError)

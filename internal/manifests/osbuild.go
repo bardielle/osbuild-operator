@@ -16,8 +16,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1alpha1 "github.com/project-flotta/osbuild-operator/api/v1alpha1"
-	"github.com/project-flotta/osbuild-operator/internal/repository/osbuild"
-	"github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfig"
+	repositoryosbuild "github.com/project-flotta/osbuild-operator/internal/repository/osbuild"
+	repositoryosbuildconfig "github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfig"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -25,23 +25,32 @@ import (
 
 //go:generate mockgen -package=manifests -source=osbuild.go -destination=mock_osbuildcrcreator.go
 type OSBuildCRCreator interface {
-	Create(ctx context.Context, osBuildConfig *v1alpha1.OSBuildConfig,
-		osBuildConfigRepository osbuildconfig.Repository, osBuildRepository osbuild.Repository,
-		osBuildConfigTemplateRepository osbuildconfigtemplate.Repository, configMapRepository configmap.Repository,
-		scheme *runtime.Scheme) error
+	Create(ctx context.Context, osBuildConfig *v1alpha1.OSBuildConfig) error
 }
-type OSBuildCreator struct{}
+type OSBuildCreator struct {
+	OSBuildRepository               repositoryosbuild.Repository
+	Scheme                          *runtime.Scheme
+	OSBuildConfigTemplateRepository osbuildconfigtemplate.Repository
+	ConfigMapRepository             configmap.Repository
+	OSBuildConfigRepository         repositoryosbuildconfig.Repository
+}
 
 var zero int
 
-func NewOSBuildCRCreator() OSBuildCRCreator {
-	return &OSBuildCreator{}
+func NewOSBuildCRCreator(osBuildConfigRepository repositoryosbuildconfig.Repository,
+	osBuildRepository repositoryosbuild.Repository, scheme *runtime.Scheme,
+	osBuildConfigTemplateRepository osbuildconfigtemplate.Repository,
+	configMapRepository configmap.Repository) OSBuildCRCreator {
+	return &OSBuildCreator{
+		OSBuildRepository:               osBuildRepository,
+		Scheme:                          scheme,
+		OSBuildConfigTemplateRepository: osBuildConfigTemplateRepository,
+		ConfigMapRepository:             configMapRepository,
+		OSBuildConfigRepository:         osBuildConfigRepository,
+	}
 }
 
-func (o *OSBuildCreator) Create(ctx context.Context, osBuildConfig *v1alpha1.OSBuildConfig,
-	osBuildConfigRepository osbuildconfig.Repository, osBuildRepository osbuild.Repository,
-	osBuildConfigTemplateRepository osbuildconfigtemplate.Repository, configMapRepository configmap.Repository,
-	scheme *runtime.Scheme) error {
+func (o *OSBuildCreator) Create(ctx context.Context, osBuildConfig *v1alpha1.OSBuildConfig) error {
 	logger := log.FromContext(ctx)
 
 	lastVersion := osBuildConfig.Status.LastVersion
@@ -62,7 +71,7 @@ func (o *OSBuildCreator) Create(ctx context.Context, osBuildConfig *v1alpha1.OSB
 	}
 
 	osBuildConfigSpecDetails := osBuildConfig.Spec.Details.DeepCopy()
-	kickstartConfigMap, osConfigTemplate, err := o.applyTemplate(ctx, osBuildConfig, osBuildConfigSpecDetails, osBuildName, osBuild, osBuildConfigTemplateRepository, configMapRepository)
+	kickstartConfigMap, osConfigTemplate, err := o.applyTemplate(ctx, osBuildConfig, osBuildConfigSpecDetails, osBuildName, osBuild)
 	if err != nil {
 		logger.Error(err, "cannot apply template to osBuild")
 		return err
@@ -71,7 +80,7 @@ func (o *OSBuildCreator) Create(ctx context.Context, osBuildConfig *v1alpha1.OSB
 
 	// Set the owner of the osBuild CR to be osBuildConfig in order to manage lifecycle of the osBuild CR.
 	// Especially in deletion of osBuildConfig CR
-	err = controllerutil.SetControllerReference(osBuildConfig, osBuild, scheme)
+	err = controllerutil.SetControllerReference(osBuildConfig, osBuild, o.Scheme)
 	if err != nil {
 		logger.Error(err, "cannot create osBuild")
 		return err
@@ -83,20 +92,20 @@ func (o *OSBuildCreator) Create(ctx context.Context, osBuildConfig *v1alpha1.OSB
 		osBuildConfig.Status.CurrentTemplateResourceVersion = &osConfigTemplate.ResourceVersion
 		osBuildConfig.Status.LastTemplateResourceVersion = &osConfigTemplate.ResourceVersion
 	}
-	err = osBuildConfigRepository.PatchStatus(ctx, osBuildConfig, &patch)
+	err = o.OSBuildConfigRepository.PatchStatus(ctx, osBuildConfig, &patch)
 	if err != nil {
 		logger.Error(err, "cannot update the field lastVersion of osBuildConfig")
 		return err
 	}
 
-	err = osBuildRepository.Create(ctx, osBuild)
+	err = o.OSBuildRepository.Create(ctx, osBuild)
 	if err != nil {
 		logger.Error(err, "cannot create osBuild")
 		return err
 	}
 
 	if kickstartConfigMap != nil {
-		err = o.setKickstartConfigMapOwner(ctx, kickstartConfigMap, osBuild, scheme, configMapRepository)
+		err = o.setKickstartConfigMapOwner(ctx, kickstartConfigMap, osBuild)
 		if err != nil {
 			logger.Error(err, "cannot set controller reference to kickstart config map")
 			return err
@@ -108,19 +117,19 @@ func (o *OSBuildCreator) Create(ctx context.Context, osBuildConfig *v1alpha1.OSB
 	return nil
 }
 
-func (o *OSBuildCreator) applyTemplate(ctx context.Context, osBuildConfig *v1alpha1.OSBuildConfig, osBuildConfigSpecDetails *v1alpha1.BuildDetails, osBuildName string, osBuild *v1alpha1.OSBuild, osBuildConfigTemplateRepository osbuildconfigtemplate.Repository, configMapRepository configmap.Repository) (*corev1.ConfigMap, *v1alpha1.OSBuildConfigTemplate, error) {
+func (o *OSBuildCreator) applyTemplate(ctx context.Context, osBuildConfig *v1alpha1.OSBuildConfig, osBuildConfigSpecDetails *v1alpha1.BuildDetails, osBuildName string, osBuild *v1alpha1.OSBuild) (*corev1.ConfigMap, *v1alpha1.OSBuildConfigTemplate, error) {
 	var kickstartConfigMap *corev1.ConfigMap
 	var osConfigTemplate *v1alpha1.OSBuildConfigTemplate
 	if template := osBuildConfig.Spec.Template; template != nil {
 		var err error
-		osConfigTemplate, err = osBuildConfigTemplateRepository.Read(ctx, template.OSBuildConfigTemplateRef, osBuildConfig.Namespace)
+		osConfigTemplate, err = o.OSBuildConfigTemplateRepository.Read(ctx, template.OSBuildConfigTemplateRef, osBuildConfig.Namespace)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		osBuildConfigSpecDetails.Customizations = customizations.MergeCustomizations(osConfigTemplate.Spec.Customizations, osBuildConfigSpecDetails.Customizations)
 
-		kickstartConfigMap, err = o.createKickstartConfigMap(ctx, osBuildConfig, osConfigTemplate, configMapRepository, osBuildName, osBuild.Namespace)
+		kickstartConfigMap, err = o.createKickstartConfigMap(ctx, osBuildConfig, osConfigTemplate, osBuildName, osBuild.Namespace)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -131,17 +140,17 @@ func (o *OSBuildCreator) applyTemplate(ctx context.Context, osBuildConfig *v1alp
 	return kickstartConfigMap, osConfigTemplate, nil
 }
 
-func (o *OSBuildCreator) setKickstartConfigMapOwner(ctx context.Context, kickstartConfigMap *corev1.ConfigMap, osBuild *v1alpha1.OSBuild, scheme *runtime.Scheme, configMapRepository configmap.Repository) error {
+func (o *OSBuildCreator) setKickstartConfigMapOwner(ctx context.Context, kickstartConfigMap *corev1.ConfigMap, osBuild *v1alpha1.OSBuild) error {
 	oldConfigMap := kickstartConfigMap.DeepCopy()
-	err := controllerutil.SetOwnerReference(osBuild, kickstartConfigMap, scheme)
+	err := controllerutil.SetOwnerReference(osBuild, kickstartConfigMap, o.Scheme)
 	if err != nil {
 		return err
 	}
-	return configMapRepository.Patch(ctx, oldConfigMap, kickstartConfigMap)
+	return o.ConfigMapRepository.Patch(ctx, oldConfigMap, kickstartConfigMap)
 }
 
-func (o *OSBuildCreator) createKickstartConfigMap(ctx context.Context, osBuildConfig *v1alpha1.OSBuildConfig, osConfigTemplate *v1alpha1.OSBuildConfigTemplate, configMapRepository configmap.Repository, name, namespace string) (*corev1.ConfigMap, error) {
-	kickstart, err := o.getKickstart(ctx, osConfigTemplate, osBuildConfig, configMapRepository)
+func (o *OSBuildCreator) createKickstartConfigMap(ctx context.Context, osBuildConfig *v1alpha1.OSBuildConfig, osConfigTemplate *v1alpha1.OSBuildConfigTemplate, name, namespace string) (*corev1.ConfigMap, error) {
+	kickstart, err := o.getKickstart(ctx, osConfigTemplate, osBuildConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +159,7 @@ func (o *OSBuildCreator) createKickstartConfigMap(ctx context.Context, osBuildCo
 		return nil, nil
 	}
 
-	cm, err := configMapRepository.Read(ctx, name, namespace)
+	cm, err := o.ConfigMapRepository.Read(ctx, name, namespace)
 	if err == nil {
 		// CM has already been created, returning it
 		return cm, nil
@@ -169,14 +178,14 @@ func (o *OSBuildCreator) createKickstartConfigMap(ctx context.Context, osBuildCo
 		},
 	}
 
-	err = configMapRepository.Create(ctx, cm)
+	err = o.ConfigMapRepository.Create(ctx, cm)
 	if err != nil {
 		return nil, err
 	}
 	return cm, nil
 }
 
-func (o *OSBuildCreator) getKickstart(ctx context.Context, osConfigTemplate *v1alpha1.OSBuildConfigTemplate, osBuildConfig *v1alpha1.OSBuildConfig, configMapRepository configmap.Repository) (*string, error) {
+func (o *OSBuildCreator) getKickstart(ctx context.Context, osConfigTemplate *v1alpha1.OSBuildConfigTemplate, osBuildConfig *v1alpha1.OSBuildConfig) (*string, error) {
 	if osConfigTemplate.Spec.Iso == nil || osConfigTemplate.Spec.Iso.Kickstart == nil {
 		return nil, nil
 	}
@@ -188,7 +197,7 @@ func (o *OSBuildCreator) getKickstart(ctx context.Context, osConfigTemplate *v1a
 	if osConfigTemplate.Spec.Iso.Kickstart.Raw != nil {
 		kickstartTemplate = *osConfigTemplate.Spec.Iso.Kickstart.Raw
 	} else {
-		cm, err := configMapRepository.Read(ctx, *osConfigTemplate.Spec.Iso.Kickstart.ConfigMapName, osBuildConfig.Namespace)
+		cm, err := o.ConfigMapRepository.Read(ctx, *osConfigTemplate.Spec.Iso.Kickstart.ConfigMapName, osBuildConfig.Namespace)
 		if err != nil {
 			return nil, err
 		}

@@ -4,18 +4,18 @@ metadata:
   name: controller-httpapi
   namespace: system
   labels:
-    control-plane: controller-httpapi
+    app: httpapi
 spec:
   selector:
     matchLabels:
-      control-plane: controller-httpapi
+      app: httpapi
   replicas: 1
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: httpapi
       labels:
-        control-plane: controller-httpapi
+        app: httpapi
     spec:
       securityContext:
         runAsNonRoot: true
@@ -25,7 +25,7 @@ spec:
           image: controller:latest
           name: httpapi
           ports:
-            - containerPort: 8043
+            - containerPort: 8080
               name: httpapi
           securityContext:
             allowPrivilegeEscalation: false
@@ -59,13 +59,13 @@ metadata:
   name: httpapi
   namespace: system
   labels:
-    control-plane: controller-httpapi
+    app: httpapi
 spec:
   ports:
     - name: httpapi
       protocol: TCP
-      port: 443
+      port: 8080
       targetPort: httpapi
   selector:
-    control-plane: controller-httpapi
+    app: httpapi
   type: ClusterIP

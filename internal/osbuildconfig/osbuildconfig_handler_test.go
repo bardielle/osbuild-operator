@@ -7,10 +7,7 @@ import (
 	buildv1 "github.com/openshift/api/build/v1"
 	"github.com/project-flotta/osbuild-operator/api/v1alpha1"
 	"github.com/project-flotta/osbuild-operator/internal/manifests"
-	"github.com/project-flotta/osbuild-operator/internal/repository/configmap"
-	repositoryosbuild "github.com/project-flotta/osbuild-operator/internal/repository/osbuild"
 	repositoryosbuildconfig "github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfig"
-	"github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfigtemplate"
 	repositorysecret "github.com/project-flotta/osbuild-operator/internal/repository/secret"
 	"github.com/project-flotta/osbuild-operator/restapi"
 	corev1 "k8s.io/api/core/v1"
@@ -44,24 +41,20 @@ var _ = Describe("OSBuildConfig rest API", func() {
 			"WebHookSecretKey": []byte(secretVal),
 		}
 
-		osBuildConfigRepository         *repositoryosbuildconfig.MockRepository
-		osBuildRepository               *repositoryosbuild.MockRepository
-		secretRepository                *repositorysecret.MockRepository
-		osBuildConfigTemplateRepository *osbuildconfigtemplate.MockRepository
-		configMapRepository             *configmap.MockRepository
-		osBuildCRCreator                *manifests.MockOSBuildCRCreator
-		responseWriter                  *httptest.ResponseRecorder
-		req                             *http.Request
-		params                          restapi.TriggerBuildParams
+		osBuildConfigRepository *repositoryosbuildconfig.MockRepository
+		secretRepository        *repositorysecret.MockRepository
+		osBuildCRCreator        *manifests.MockOSBuildCRCreator
+		responseWriter          *httptest.ResponseRecorder
+		osbuildConfigHandler    *OSBuildConfigHandler
+		req                     *http.Request
+		params                  restapi.TriggerBuildParams
 	)
 	BeforeEach(func() {
 		mockCtrl = gomock.NewController(GinkgoT())
-		osBuildRepository = repositoryosbuild.NewMockRepository(mockCtrl)
 		osBuildConfigRepository = repositoryosbuildconfig.NewMockRepository(mockCtrl)
 		osBuildCRCreator = manifests.NewMockOSBuildCRCreator(mockCtrl)
 		secretRepository = repositorysecret.NewMockRepository(mockCtrl)
-		osBuildConfigTemplateRepository = osbuildconfigtemplate.NewMockRepository(mockCtrl)
-		configMapRepository = configmap.NewMockRepository(mockCtrl)
+		osbuildConfigHandler = NewOSBuildConfigHandler(osBuildConfigRepository, secretRepository, osBuildCRCreator)
 
 		secret = corev1.Secret{
 			ObjectMeta: v1.ObjectMeta{
@@ -114,11 +107,10 @@ var _ = Describe("OSBuildConfig rest API", func() {
 	Context("trigger a build", func() {
 		It("and succeed", func() {
 			// given
-			osbuildConfigHandler := NewOSBuildConfigHandler(osBuildConfigRepository, osBuildRepository, secretRepository, nil, osBuildCRCreator, osBuildConfigTemplateRepository, configMapRepository)
 			osBuildConfigRepository.EXPECT().Read(req.Context(), OSBuildConfigName, Namespace).Return(&osbuildConfig, nil)
 			secretRepository.EXPECT().Read(req.Context(), SecretName, Namespace).Return(&secret, nil)
 
-			osBuildCRCreator.EXPECT().Create(req.Context(), &osbuildConfig, osBuildConfigRepository, osBuildRepository, osBuildConfigTemplateRepository, configMapRepository, nil).Return(nil)
+			osBuildCRCreator.EXPECT().Create(req.Context(), &osbuildConfig).Return(nil)
 			// when
 			osbuildConfigHandler.TriggerBuild(responseWriter, req, Namespace, OSBuildConfigName, params)
 
@@ -129,7 +121,6 @@ var _ = Describe("OSBuildConfig rest API", func() {
 
 		It("with not found response, because osbuildConfig doesn't exist", func() {
 			// given
-			osbuildConfigHandler := NewOSBuildConfigHandler(osBuildConfigRepository, osBuildRepository, secretRepository, nil, osBuildCRCreator, osBuildConfigTemplateRepository, configMapRepository)
 			returnErr := errors.NewNotFound(schema.GroupResource{Group: "", Resource: "notfound"}, "notfound")
 			osBuildConfigRepository.EXPECT().Read(req.Context(), OSBuildConfigName, Namespace).Return(nil, returnErr)
 
@@ -142,7 +133,6 @@ var _ = Describe("OSBuildConfig rest API", func() {
 
 		It("with internalServerError response, because osbuildConfigRepository failed", func() {
 			// given
-			osbuildConfigHandler := NewOSBuildConfigHandler(osBuildConfigRepository, osBuildRepository, secretRepository, nil, osBuildCRCreator, osBuildConfigTemplateRepository, configMapRepository)
 			returnErr := errors.NewBadRequest("test")
 			osBuildConfigRepository.EXPECT().Read(req.Context(), OSBuildConfigName, Namespace).Return(nil, returnErr)
 
@@ -155,8 +145,6 @@ var _ = Describe("OSBuildConfig rest API", func() {
 
 		It("with bad request response, because osbuildConfig hasn't webhook", func() {
 			// given
-
-			osbuildConfigHandler := NewOSBuildConfigHandler(osBuildConfigRepository, osBuildRepository, secretRepository, nil, osBuildCRCreator, osBuildConfigTemplateRepository, configMapRepository)
 			osBuildConfigRepository.EXPECT().Read(req.Context(), OSBuildConfigName, Namespace).Return(&osbuildConfig, nil)
 			osbuildConfig.Spec.Triggers.WebHook = nil
 
@@ -169,7 +157,6 @@ var _ = Describe("OSBuildConfig rest API", func() {
 
 		It("with not found response, because the secret doesn't exist", func() {
 			// given
-			osbuildConfigHandler := NewOSBuildConfigHandler(osBuildConfigRepository, osBuildRepository, secretRepository, nil, osBuildCRCreator, osBuildConfigTemplateRepository, configMapRepository)
 			osBuildConfigRepository.EXPECT().Read(req.Context(), OSBuildConfigName, Namespace).Return(&osbuildConfig, nil)
 			returnErr := errors.NewNotFound(schema.GroupResource{Group: "", Resource: "notfound"}, "notfound")
 			secretRepository.EXPECT().Read(req.Context(), SecretName, Namespace).Return(nil, returnErr)
@@ -183,7 +170,6 @@ var _ = Describe("OSBuildConfig rest API", func() {
 
 		It("with internalServerError response, because getting the secret failed", func() {
 			// given
-			osbuildConfigHandler := NewOSBuildConfigHandler(osBuildConfigRepository, osBuildRepository, secretRepository, nil, osBuildCRCreator, osBuildConfigTemplateRepository, configMapRepository)
 			osBuildConfigRepository.EXPECT().Read(req.Context(), OSBuildConfigName, Namespace).Return(&osbuildConfig, nil)
 			returnErr := errors.NewBadRequest("test")
 			secretRepository.EXPECT().Read(req.Context(), SecretName, Namespace).Return(nil, returnErr)
@@ -197,7 +183,6 @@ var _ = Describe("OSBuildConfig rest API", func() {
 
 		It("with forbidden response, because the webhook secret value different from the input param", func() {
 			// given
-			osbuildConfigHandler := NewOSBuildConfigHandler(osBuildConfigRepository, osBuildRepository, secretRepository, nil, osBuildCRCreator, osBuildConfigTemplateRepository, configMapRepository)
 			osBuildConfigRepository.EXPECT().Read(req.Context(), OSBuildConfigName, Namespace).Return(&osbuildConfig, nil)
 			secretRepository.EXPECT().Read(req.Context(), SecretName, Namespace).Return(&secret, nil)
 			params.Secret = "456"
@@ -212,11 +197,10 @@ var _ = Describe("OSBuildConfig rest API", func() {
 
 		It("with internalServerError response, because the creation of the osbuild CR failed", func() {
 			// given
-			osbuildConfigHandler := NewOSBuildConfigHandler(osBuildConfigRepository, osBuildRepository, secretRepository, nil, osBuildCRCreator, osBuildConfigTemplateRepository, configMapRepository)
 			osBuildConfigRepository.EXPECT().Read(req.Context(), OSBuildConfigName, Namespace).Return(&osbuildConfig, nil)
 			secretRepository.EXPECT().Read(req.Context(), SecretName, Namespace).Return(&secret, nil)
 			returnErr := errors.NewBadRequest("test")
-			osBuildCRCreator.EXPECT().Create(gomock.Any(), &osbuildConfig, osBuildConfigRepository, osBuildRepository, osBuildConfigTemplateRepository, configMapRepository, nil).Return(returnErr)
+			osBuildCRCreator.EXPECT().Create(gomock.Any(), &osbuildConfig).Return(returnErr)
 			// when
 			osbuildConfigHandler.TriggerBuild(responseWriter, req, Namespace, OSBuildConfigName, params)
 

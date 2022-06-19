@@ -5,9 +5,9 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-func Logger() (error, *zap.SugaredLogger) {
+func Logger(logLevel string) (error, *zap.SugaredLogger) {
 	var level zapcore.Level
-	err := level.UnmarshalText([]byte("info"))
+	err := level.UnmarshalText([]byte(logLevel))
 	if err != nil {
 		return err, nil
 	}

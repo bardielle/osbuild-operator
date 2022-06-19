@@ -10,11 +10,6 @@ import (
 
 	gomock "github.com/golang/mock/gomock"
 	v1alpha1 "github.com/project-flotta/osbuild-operator/api/v1alpha1"
-	configmap "github.com/project-flotta/osbuild-operator/internal/repository/configmap"
-	osbuild "github.com/project-flotta/osbuild-operator/internal/repository/osbuild"
-	osbuildconfig "github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfig"
-	osbuildconfigtemplate "github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfigtemplate"
-	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
 // MockOSBuildCRCreator is a mock of OSBuildCRCreator interface.
@@ -41,15 +36,15 @@ func (m *MockOSBuildCRCreator) EXPECT() *MockOSBuildCRCreatorMockRecorder {
 }
 
 // Create mocks base method.
-func (m *MockOSBuildCRCreator) Create(ctx context.Context, osBuildConfig *v1alpha1.OSBuildConfig, osBuildConfigRepository osbuildconfig.Repository, osBuildRepository osbuild.Repository, osBuildConfigTemplateRepository osbuildconfigtemplate.Repository, configMapRepository configmap.Repository, scheme *runtime.Scheme) error {
+func (m *MockOSBuildCRCreator) Create(ctx context.Context, osBuildConfig *v1alpha1.OSBuildConfig) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Create", ctx, osBuildConfig, osBuildConfigRepository, osBuildRepository, osBuildConfigTemplateRepository, configMapRepository, scheme)
+	ret := m.ctrl.Call(m, "Create", ctx, osBuildConfig)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Create indicates an expected call of Create.
-func (mr *MockOSBuildCRCreatorMockRecorder) Create(ctx, osBuildConfig, osBuildConfigRepository, osBuildRepository, osBuildConfigTemplateRepository, configMapRepository, scheme interface{}) *gomock.Call {
+func (mr *MockOSBuildCRCreatorMockRecorder) Create(ctx, osBuildConfig interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockOSBuildCRCreator)(nil).Create), ctx, osBuildConfig, osBuildConfigRepository, osBuildRepository, osBuildConfigTemplateRepository, configMapRepository, scheme)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*MockOSBuildCRCreator)(nil).Create), ctx, osBuildConfig)
 }

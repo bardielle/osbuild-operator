@@ -22,28 +22,20 @@ import (
 
 	"github.com/project-flotta/osbuild-operator/internal/manifests"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	osbuilderv1alpha1 "github.com/project-flotta/osbuild-operator/api/v1alpha1"
 	"github.com/project-flotta/osbuild-operator/internal/predicates"
-	"github.com/project-flotta/osbuild-operator/internal/repository/configmap"
-	"github.com/project-flotta/osbuild-operator/internal/repository/osbuild"
 	"github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfig"
-	"github.com/project-flotta/osbuild-operator/internal/repository/osbuildconfigtemplate"
 )
 
 // OSBuildConfigReconciler reconciles a OSBuildConfig object
 type OSBuildConfigReconciler struct {
 	client.Client
-	Scheme                          *runtime.Scheme
-	OSBuildConfigRepository         osbuildconfig.Repository
-	OSBuildRepository               osbuild.Repository
-	OSBuildConfigTemplateRepository osbuildconfigtemplate.Repository
-	ConfigMapRepository             configmap.Repository
-	OSBuildCRCreator                manifests.OSBuildCRCreator
+	OSBuildConfigRepository osbuildconfig.Repository
+	OSBuildCRCreator        manifests.OSBuildCRCreator
 }
 
 //+kubebuilder:rbac:groups=osbuilder.project-flotta.io,resources=osbuildconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -78,8 +70,7 @@ func (r *OSBuildConfigReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	err = r.OSBuildCRCreator.Create(ctx, osBuildConfig, r.OSBuildConfigRepository, r.OSBuildRepository,
-		r.OSBuildConfigTemplateRepository, r.ConfigMapRepository, r.Scheme)
+	err = r.OSBuildCRCreator.Create(ctx, osBuildConfig)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, err

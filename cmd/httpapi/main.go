@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/project-flotta/osbuild-operator/api/v1alpha1"
-	internalhttpapi "github.com/project-flotta/osbuild-operator/internal/httpapi"
+	"github.com/project-flotta/osbuild-operator/internal/httpapi"
 	loggerutil "github.com/project-flotta/osbuild-operator/internal/logger"
 	"github.com/project-flotta/osbuild-operator/internal/manifests"
 	internalosbuildconfig "github.com/project-flotta/osbuild-operator/internal/osbuildconfig"
@@ -28,9 +28,10 @@ import (
 )
 
 var (
-	Config internalhttpapi.Config
 	scheme = runtime.NewScheme()
 )
+
+var Config httpapi.Config
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -44,8 +45,7 @@ func main() {
 	if err != nil {
 		panic(err.Error())
 	}
-
-	err, logger := loggerutil.Logger()
+	err, logger := loggerutil.Logger(Config.LogLevel)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -62,16 +62,16 @@ func main() {
 		panic(err.Error())
 	}
 
-	OSBuildConfigRepository := osbuildconfig.NewOSBuildConfigRepository(c)
-	SecretRepository := repositorysecret.NewSecretRepository(c)
-	OSBuildRepository := osbuild.NewOSBuildRepository(c)
-	OSBuildConfigTemplateRepository := osbuildconfigtemplate.NewOSBuildConfigTemplateRepository(c)
-	ConfigMapRepository := configmap.NewConfigMapRepository(c)
-	OSBuildCRCreator := manifests.NewOSBuildCRCreator()
+	osBuildConfigRepository := osbuildconfig.NewOSBuildConfigRepository(c)
+	secretRepository := repositorysecret.NewSecretRepository(c)
+	osBuildRepository := osbuild.NewOSBuildRepository(c)
+	osBuildConfigTemplateRepository := osbuildconfigtemplate.NewOSBuildConfigTemplateRepository(c)
+	configMapRepository := configmap.NewConfigMapRepository(c)
+	osBuildCRCreator := manifests.NewOSBuildCRCreator(osBuildConfigRepository, osBuildRepository, scheme, osBuildConfigTemplateRepository, configMapRepository)
 
-	h := restapi.Handler(internalosbuildconfig.NewOSBuildConfigHandler(OSBuildConfigRepository, OSBuildRepository, SecretRepository, scheme, OSBuildCRCreator, OSBuildConfigTemplateRepository, ConfigMapRepository))
+	h := restapi.Handler(internalosbuildconfig.NewOSBuildConfigHandler(osBuildConfigRepository, secretRepository, osBuildCRCreator))
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%v", Config.HttpsPort),
+		Addr:    fmt.Sprintf(":%v", Config.HttpPort),
 		Handler: h,
 	}
 	go func() {

@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"github.com/project-flotta/osbuild-operator/internal/manifests"
 	"github.com/project-flotta/osbuild-operator/internal/repository/configmap"
 	"os"
 
@@ -99,14 +100,12 @@ func main() {
 	osBuildRepository := osbuild.NewOSBuildRepository(mgr.GetClient())
 	osBuildConfigTemplateRepository := osbuildconfigtemplate.NewOSBuildConfigTemplateRepository(mgr.GetClient())
 	configMapRepository := configmap.NewConfigMapRepository(mgr.GetClient())
+	osBuildCRCreator := manifests.NewOSBuildCRCreator(osBuildConfigRepository, osBuildRepository, scheme, osBuildConfigTemplateRepository, configMapRepository)
 
 	if err = (&controllers.OSBuildConfigReconciler{
-		Client:                          mgr.GetClient(),
-		Scheme:                          mgr.GetScheme(),
-		OSBuildConfigRepository:         osBuildConfigRepository,
-		OSBuildRepository:               osBuildRepository,
-		OSBuildConfigTemplateRepository: osBuildConfigTemplateRepository,
-		ConfigMapRepository:             configMapRepository,
+		Client:                  mgr.GetClient(),
+		OSBuildConfigRepository: osBuildConfigRepository,
+		OSBuildCRCreator:        osBuildCRCreator,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "OSBuildConfig")
 		os.Exit(1)
