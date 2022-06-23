@@ -17,6 +17,10 @@ require (
 
 require (
 	github.com/golang-jwt/jwt/v4 v4.0.0 // indirect
+	github.com/openshift/custom-resource-status v1.1.2 // indirect
+	github.com/pborman/uuid v1.2.0 // indirect
+	kubevirt.io/containerized-data-importer-api v1.47.0 // indirect
+	kubevirt.io/controller-lifecycle-operator-sdk/api v0.0.0-20220329064328-f3cc58c6ed90 // indirect
 	sigs.k8s.io/gateway-api v0.4.1 // indirect
 )
 
@@ -40,13 +44,13 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/deepmap/oapi-codegen v1.11.0
-	github.com/emicklei/go-restful v2.9.5+incompatible // indirect
+	github.com/emicklei/go-restful v2.15.0+incompatible // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.5.1 // indirect
 	github.com/go-chi/chi/v5 v5.0.7
 	github.com/go-logr/zapr v1.2.0 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
-	github.com/go-openapi/jsonreference v0.19.5 // indirect
+	github.com/go-openapi/jsonreference v0.19.6 // indirect
 	github.com/go-openapi/swag v0.21.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
@@ -76,7 +80,7 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.21.0
-	golang.org/x/crypto v0.0.0-20220513210258-46612604a0f9 // indirect
+	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d
 	golang.org/x/net v0.0.0-20220513224357-95641704303c // indirect
 	golang.org/x/oauth2 v0.0.0-20211104180415-d3ed0bb246c8 // indirect
 	golang.org/x/sys v0.0.0-20220513210249-45d2b4557a2a // indirect
@@ -100,4 +104,7 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-require github.com/go-logr/logr v1.2.3
+require (
+	github.com/go-logr/logr v1.2.3
+	kubevirt.io/api v0.54.0
+)

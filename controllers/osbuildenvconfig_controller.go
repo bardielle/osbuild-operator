@@ -19,13 +19,16 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"path"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	serializer "k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -34,6 +37,9 @@ import (
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	certmanagermetav1 "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
+
+	kubevirtv1 "kubevirt.io/api/core/v1"
+
 	"github.com/go-logr/logr"
 
 	osbuildv1alpha1 "github.com/project-flotta/osbuild-operator/api/v1alpha1"
@@ -41,9 +47,12 @@ import (
 	"github.com/project-flotta/osbuild-operator/internal/repository/certificate"
 	"github.com/project-flotta/osbuild-operator/internal/repository/configmap"
 	"github.com/project-flotta/osbuild-operator/internal/repository/deployment"
+	"github.com/project-flotta/osbuild-operator/internal/repository/job"
 	"github.com/project-flotta/osbuild-operator/internal/repository/osbuildenvconfig"
 	"github.com/project-flotta/osbuild-operator/internal/repository/secret"
 	"github.com/project-flotta/osbuild-operator/internal/repository/service"
+	"github.com/project-flotta/osbuild-operator/internal/repository/virtualmachine"
+	"github.com/project-flotta/osbuild-operator/internal/sshkey"
 	"github.com/project-flotta/osbuild-operator/internal/templates"
 )
 
@@ -76,18 +85,62 @@ const (
 	composerDeploymentName         = "composer"
 	composerDeploymentTemplateFile = "composer-deployment.yaml"
 
-	composerImageName = "quay.io/app-sre/composer"
-	composerImageTag  = "fc87b17"
-
-	envoyProxyImageName = "docker.io/envoyproxy/envoy"
-	envoyProxyImageTag  = "v1.21-latest"
-
 	composerAPIInternalPort = 18080
 	composerAPIExternalPort = 8080
 	workerAPIInternalPort   = 18700
 	workerAPIExternalPort   = 8700
 
 	envoyProxyCertsDir = "/etc/certs"
+
+	workerSSHKeysSecretName    = "osbuild-worker-ssh" // #nosec G101
+	workerSSHKeysPrivateKeyKey = "ssh-privatekey"
+	workerSSHKeysPublicKeyKey  = "ssh-publickey"
+
+	workerVMUsername     = "cloud-user"
+	workerVMTemplateFile = "worker-vm.yaml"
+
+	workerSSHServiceNameFormat = "worker-%s-ssh"
+	workerSSHPortName          = "ssh"
+
+	workerCertificateNameFormat = "worker-%s-cert"
+
+	workerConfigPlaybookConfigMapName = "osbuild-worker-setup-playbook"
+	workerConfigPlaybookConfigMapKey  = "playbook.yaml"
+	workerConfigPlaybookTemplateFile  = "worker-config-ansible-playbook.yaml"
+
+	workerRPMRepoDistribution      = "rhel-8-cdn"
+	workerRHCredentialsDir         = "/var/secrets/redhat-portal-credentials" // #nosec G101
+	workerRHCredentialsUsernameKey = "username"
+	workerRHCredentialsPasswordKey = "password"
+	workerOSBuildWorkerCertsDir    = "/var/secrets/osbuild-worker-certs"
+
+	workerConfigAnsibleConfigConfigMapName = "osbuild-worker-setup-ansible-config"
+	workerConfigAnsibleConfigConfigMapKey  = "ansible.cfg"
+	workerConfigAnsibleConfigTemplateFile  = "worker-config-ansible-config.cfg"
+
+	workerConfigInventoryConfigMapNameFormat = "worker-%s-inventory"
+	workerConfigInventoryConfigMapKey        = "inventory.yaml"
+	workerConfigInventoryTemplateFile        = "worker-config-ansible-inventory.yaml"
+
+	workerOSBuildWorkerConfigConfigMapName     = "osbuild-worker-config"
+	workerOSBuildWorkerConfigConfigMapKey      = "osbuild-worker.toml"
+	workerOSBuildWorkerConfigTemplateFile      = "worker-osbuild-worker-config.toml"
+	workerOSBuildWorkerConfigDir               = "/var/config"
+	workerOSBuildWorkerConfigS3CredentialsFile = "s3-creds"
+	workerOSBuildWorkerConfigS3CABundleFile    = "s3-cabundle"
+
+	workerOSBuildWorkerS3CredsDir    = "/var/secrets/osbuild-s3-certs" // #nosec G101
+	workerOSBuildWorkerS3CABundleDir = "/var/secrets/osbuild-s3-ca-bundle"
+
+	workerOSBuildWorkerS3CredsAccessKeyIDKey     = "access-key-id"
+	workerOSBuildWorkerS3CredsSecretAccessKeyKey = "secret-access-key"
+	workerOSBuildWorkerS3CABundleKey             = "ca-bundle"
+
+	workerConfigJobSSHKeyDir = "/var/secrets/ssh"
+
+	workerSetupJobTemplateFile = "worker-setup-job.yaml"
+
+	workerConfigJobNameFormat = "worker-%s-setup"
 )
 
 // composerDeploymentParameters includes all the parameters needed to render the Composer Proxy Config and Deployment
@@ -113,6 +166,15 @@ type composerDeploymentParameters struct {
 	ProxyConfigMapName               string
 }
 
+type workerVMParameters struct {
+	Namespace         string
+	Name              string
+	ImageURL          string
+	Hostname          string
+	Username          string
+	SSHKeysSecretName string
+}
+
 // OSBuildEnvConfigReconciler reconciles a OSBuildEnvConfig object
 type OSBuildEnvConfigReconciler struct {
 	Scheme                     *runtime.Scheme
@@ -120,16 +182,20 @@ type OSBuildEnvConfigReconciler struct {
 	CertificateRepository      certificate.Repository
 	ConfigMapRepository        configmap.Repository
 	DeploymentRepository       deployment.Repository
+	JobRepository              job.Repository
 	ServiceRepository          service.Repository
 	SecretRepository           secret.Repository
+	VirtualmachineRepository   virtualmachine.Repository
 }
 
 //+kubebuilder:rbac:groups=osbuilder.project-flotta.io,resources=osbuildenvconfigs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=osbuilder.project-flotta.io,resources=osbuildenvconfigs/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=osbuilder.project-flotta.io,resources=osbuildenvconfigs/finalizers,verbs=update
 //+kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
@@ -210,10 +276,10 @@ func (r *OSBuildEnvConfigReconciler) Update(ctx context.Context, reqLogger logr.
 	composerDeploymentParams := composerDeploymentParameters{
 		ComposerDeploymentNamespace:      conf.GlobalConf.WorkingNamespace,
 		ComposerDeploymentName:           composerDeploymentName,
-		ComposerImageName:                composerImageName,
-		ComposerImageTag:                 composerImageTag,
-		ProxyImageName:                   envoyProxyImageName,
-		ProxyImageTag:                    envoyProxyImageTag,
+		ComposerImageName:                conf.GlobalConf.ComposerImageName,
+		ComposerImageTag:                 conf.GlobalConf.ComposerImageTag,
+		ProxyImageName:                   conf.GlobalConf.EnvoyProxyImageName,
+		ProxyImageTag:                    conf.GlobalConf.EnvoyProxyImageTag,
 		ComposerAPIInternalPort:          composerAPIInternalPort,
 		ComposerAPIExternalPort:          composerAPIExternalPort,
 		WorkerAPIInternalPort:            workerAPIInternalPort,
@@ -276,6 +342,106 @@ func (r *OSBuildEnvConfigReconciler) Update(ctx context.Context, reqLogger logr.
 	} else if created {
 		reqLogger.Info("Generated Service for the Composer's Worker API")
 		return ctrl.Result{Requeue: true}, nil
+	}
+
+	created, err = r.ensureWorkerConfigAnsibleConfigExists(ctx, instance)
+	if err != nil {
+		return ctrl.Result{Requeue: true}, err
+	} else if created {
+		reqLogger.Info("Generated ConfigMap for Ansible Config")
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	created, err = r.ensureWorkerConfigPlaybookExists(ctx, instance)
+	if err != nil {
+		return ctrl.Result{Requeue: true}, err
+	} else if created {
+		reqLogger.Info("Generated ConfigMap for Ansible Playbook")
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	created, err = r.ensureOSBuildWorkerConfigExists(ctx, instance)
+	if err != nil {
+		return ctrl.Result{Requeue: true}, err
+	} else if created {
+		reqLogger.Info("Generated ConfigMap for Worker configuration")
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	var sshKeysSecret *corev1.Secret
+	for _, worker := range instance.Spec.Workers {
+		var workerAddress string
+		var workerUser string
+		var workerSSHKeySecretName string
+
+		if worker.VMWorkerConfig != nil {
+			if sshKeysSecret == nil {
+				sshKeysSecret, created, err = r.getOrCreateWorkerSSHKeysSecret(ctx, instance)
+				if err != nil {
+					return ctrl.Result{Requeue: true}, err
+				} else if created {
+					reqLogger.Info("Generated Secret for SSH Keys")
+					return ctrl.Result{Requeue: true}, nil
+				}
+			}
+
+			vmParameters := workerVMParameters{
+				Namespace:         conf.GlobalConf.WorkingNamespace,
+				Name:              worker.Name,
+				ImageURL:          worker.VMWorkerConfig.ImageURL,
+				Hostname:          worker.Name,
+				Username:          workerVMUsername,
+				SSHKeysSecretName: workerSSHKeysSecretName,
+			}
+
+			created, err = r.ensureWorkerVMExists(ctx, &vmParameters, instance)
+			if err != nil {
+				return ctrl.Result{Requeue: true}, err
+			} else if created {
+				reqLogger.Info("Generated VM for Worker", "name", worker.Name)
+				return ctrl.Result{Requeue: true}, nil
+			}
+
+			created, err = r.ensureWorkerVMSSHServiceExists(ctx, worker.Name, instance)
+			if err != nil {
+				return ctrl.Result{Requeue: true}, err
+			} else if created {
+				reqLogger.Info("Generated SSH Service for Worker", "name", worker.Name)
+				return ctrl.Result{Requeue: true}, nil
+			}
+
+			workerAddress = fmt.Sprintf(workerSSHServiceNameFormat, worker.Name)
+			workerUser = workerVMUsername
+			workerSSHKeySecretName = workerSSHKeysSecretName
+		} else {
+			workerAddress = worker.ExternalWorkerConfig.Address
+			workerUser = worker.ExternalWorkerConfig.User
+			workerSSHKeySecretName = worker.ExternalWorkerConfig.SSHKeySecretReference.Name
+		}
+
+		created, err = r.ensureWorkerCertificateExists(ctx, reqLogger, instance, worker.Name)
+		if err != nil {
+			return ctrl.Result{Requeue: true}, err
+		} else if created {
+			reqLogger.Info("Generated Certificate for Worker", "name", worker.Name)
+			return ctrl.Result{Requeue: true}, nil
+		}
+
+		created, err = r.ensureWorkerConfigInventoryExists(ctx, instance, worker.Name, workerAddress, workerUser)
+		if err != nil {
+			return ctrl.Result{Requeue: true}, err
+		} else if created {
+			reqLogger.Info("Generated ConfigMap for Inventory file for Worker", "name", worker.Name)
+			return ctrl.Result{Requeue: true}, nil
+		}
+
+		created, err = r.ensureWorkerSetupJobExists(ctx, instance, worker.Name, workerSSHKeySecretName)
+		if err != nil {
+			return ctrl.Result{Requeue: true}, err
+		} else if created {
+			reqLogger.Info("Generated Setup Job for Worker", "name", worker.Name)
+			return ctrl.Result{Requeue: true}, nil
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -457,13 +623,17 @@ func (r *OSBuildEnvConfigReconciler) ensureComposerWorkerAPIServiceExists(ctx co
 }
 
 func (r *OSBuildEnvConfigReconciler) ensureComposerServiceExists(ctx context.Context, serviceName, portName string, targetPort int, instance *osbuildv1alpha1.OSBuildEnvConfig) (bool, error) {
+	return r.ensureServiceExists(ctx, serviceName, portName, 443, targetPort, map[string]string{"app": "osbuild-composer"}, instance)
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureServiceExists(ctx context.Context, serviceName, portName string, port, targetPort int, selector map[string]string, instance *osbuildv1alpha1.OSBuildEnvConfig) (bool, error) {
 	_, err := r.ServiceRepository.Read(ctx, serviceName, conf.GlobalConf.WorkingNamespace)
 	if err == nil {
 		return false, nil
 	}
 
 	if errors.IsNotFound(err) {
-		service, err := r.generateComposerService(serviceName, portName, targetPort, instance)
+		service, err := r.generateService(serviceName, portName, port, targetPort, selector, instance)
 		if err != nil {
 			return false, err
 		}
@@ -479,7 +649,7 @@ func (r *OSBuildEnvConfigReconciler) ensureComposerServiceExists(ctx context.Con
 	return false, err
 }
 
-func (r *OSBuildEnvConfigReconciler) generateComposerService(serviceName, portName string, targetPort int, instance *osbuildv1alpha1.OSBuildEnvConfig) (*corev1.Service, error) {
+func (r *OSBuildEnvConfigReconciler) generateService(serviceName, portName string, port, targetPort int, selector map[string]string, instance *osbuildv1alpha1.OSBuildEnvConfig) (*corev1.Service, error) {
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      serviceName,
@@ -490,18 +660,321 @@ func (r *OSBuildEnvConfigReconciler) generateComposerService(serviceName, portNa
 			Ports: []corev1.ServicePort{
 				{
 					Name:       portName,
-					Port:       443,
+					Port:       int32(port),
 					Protocol:   "TCP",
 					TargetPort: intstr.FromInt(targetPort),
 				},
 			},
-			Selector: map[string]string{
-				"app": "osbuild-composer",
-			},
+			Selector: selector,
 		},
 	}
 
 	return service, controllerutil.SetControllerReference(instance, service, r.Scheme)
+}
+
+func (r *OSBuildEnvConfigReconciler) getOrCreateWorkerSSHKeysSecret(ctx context.Context, instance *osbuildv1alpha1.OSBuildEnvConfig) (*corev1.Secret, bool, error) {
+	workerSSLSecret, err := r.SecretRepository.Read(ctx, workerSSHKeysSecretName, conf.GlobalConf.WorkingNamespace)
+	if err == nil {
+		return workerSSLSecret, false, nil
+	}
+
+	if errors.IsNotFound(err) {
+		privateKeyBytes, publicKeyBytes, err := sshkey.GenerateSSHKeyPair()
+		if err != nil {
+			return nil, false, err
+		}
+		workerSSLSecret, err = r.generateWorkerSSHKeysSecret(instance, privateKeyBytes, publicKeyBytes)
+		if err != nil {
+			return workerSSLSecret, false, err
+		}
+
+		err = r.SecretRepository.Create(ctx, workerSSLSecret)
+		if err != nil {
+			return workerSSLSecret, false, err
+		}
+
+		return workerSSLSecret, true, nil
+	}
+
+	return nil, false, err
+}
+
+func (r *OSBuildEnvConfigReconciler) generateWorkerSSHKeysSecret(instance *osbuildv1alpha1.OSBuildEnvConfig, privateKeyBytes, publicKeyBytes []byte) (*corev1.Secret, error) {
+	immutable := true
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      workerSSHKeysSecretName,
+			Namespace: conf.GlobalConf.WorkingNamespace,
+		},
+		Immutable: &immutable,
+		StringData: map[string]string{
+			workerSSHKeysPrivateKeyKey: string(privateKeyBytes),
+			workerSSHKeysPublicKeyKey:  string(publicKeyBytes),
+		},
+	}
+
+	return secret, controllerutil.SetControllerReference(instance, secret, r.Scheme)
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureWorkerVMExists(ctx context.Context, vmParameters *workerVMParameters, instance *osbuildv1alpha1.OSBuildEnvConfig) (bool, error) {
+	_, err := r.VirtualmachineRepository.Read(ctx, vmParameters.Name, conf.GlobalConf.WorkingNamespace)
+	if err == nil {
+		return false, nil
+	}
+
+	if errors.IsNotFound(err) {
+		workerVm, err := r.generateWorkerVN(vmParameters, instance)
+		if err != nil {
+			return false, err
+		}
+
+		err = r.VirtualmachineRepository.Create(ctx, workerVm)
+		if err != nil {
+			return false, err
+		}
+
+		return true, nil
+	}
+
+	return false, err
+}
+
+func (r *OSBuildEnvConfigReconciler) generateWorkerVN(vmParameters *workerVMParameters, instance *osbuildv1alpha1.OSBuildEnvConfig) (*kubevirtv1.VirtualMachine, error) {
+	buf, err := templates.LoadFromTemplateFile(workerVMTemplateFile, vmParameters)
+	if err != nil {
+		return nil, err
+	}
+
+	obj, groupVersionKind, err := serializer.NewCodecFactory(r.Scheme).UniversalDeserializer().Decode(buf.Bytes(), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if *groupVersionKind != kubevirtv1.VirtualMachineGroupVersionKind {
+		return nil, fmt.Errorf("failed to deserializer into a VirtualMachine CR")
+	}
+
+	vm, ok := obj.(*kubevirtv1.VirtualMachine)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast into a VirtualMachine object")
+	}
+
+	return vm, controllerutil.SetControllerReference(instance, vm, r.Scheme)
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureWorkerVMSSHServiceExists(ctx context.Context, workerName string, instance *osbuildv1alpha1.OSBuildEnvConfig) (bool, error) {
+	return r.ensureServiceExists(ctx, fmt.Sprintf(workerSSHServiceNameFormat, workerName), workerSSHPortName, 22, 22, map[string]string{"osbuild-worker": workerName}, instance)
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureWorkerCertificateExists(ctx context.Context, reqLogger logr.Logger, instance *osbuildv1alpha1.OSBuildEnvConfig, workerName string) (bool, error) {
+	return r.ensureCertificateExists(ctx, reqLogger, instance, fmt.Sprintf(workerCertificateNameFormat, workerName), []string{workerName})
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureWorkerConfigPlaybookExists(ctx context.Context, instance *osbuildv1alpha1.OSBuildEnvConfig) (bool, error) {
+	workerConfigPlaybookParams := struct {
+		RPMRepoDistribution                    string
+		OSBuildComposerTag                     string
+		OSBuildTag                             string
+		RHCredentialsDir                       string
+		RHCredentialsUsernameKey               string
+		RHCredentialsPasswordKey               string
+		OSBuildWorkerCertsDir                  string
+		ComposerWorkerAPIServiceName           string
+		OSBuildWorkerConfigDir                 string
+		OSBuildWorkerConfigFile                string
+		OSBuildWorkerS3CredsFile               string
+		OSBuildWorkerS3CredsDir                string
+		OSBuildWorkerS3CredsAccessKeyIDKey     string
+		OSBuildWorkerS3CredsSecretAccessKeyKey string
+		OSBuildWorkerS3CABundleFile            string
+		OSBuildWorkerS3CABundleDir             string
+		OSBuildWorkerS3CABundleKey             string
+	}{
+		RPMRepoDistribution:                    workerRPMRepoDistribution,
+		OSBuildComposerTag:                     conf.GlobalConf.WorkerOSBuildComposerVersion,
+		OSBuildTag:                             conf.GlobalConf.WorkerOSBuildVersion,
+		RHCredentialsDir:                       workerRHCredentialsDir,
+		RHCredentialsUsernameKey:               workerRHCredentialsUsernameKey,
+		RHCredentialsPasswordKey:               workerRHCredentialsPasswordKey,
+		OSBuildWorkerCertsDir:                  workerOSBuildWorkerCertsDir,
+		ComposerWorkerAPIServiceName:           composerWorkerAPIServiceName,
+		OSBuildWorkerConfigDir:                 workerOSBuildWorkerConfigDir,
+		OSBuildWorkerConfigFile:                workerOSBuildWorkerConfigConfigMapKey,
+		OSBuildWorkerS3CredsFile:               workerOSBuildWorkerConfigS3CredentialsFile,
+		OSBuildWorkerS3CredsDir:                workerOSBuildWorkerS3CredsDir,
+		OSBuildWorkerS3CredsAccessKeyIDKey:     workerOSBuildWorkerS3CredsAccessKeyIDKey,
+		OSBuildWorkerS3CredsSecretAccessKeyKey: workerOSBuildWorkerS3CredsSecretAccessKeyKey,
+		OSBuildWorkerS3CABundleFile:            workerOSBuildWorkerConfigS3CABundleFile,
+		OSBuildWorkerS3CABundleDir:             workerOSBuildWorkerS3CABundleDir,
+		OSBuildWorkerS3CABundleKey:             workerOSBuildWorkerS3CABundleKey,
+	}
+	return r.ensureConfigMapForTemplateFileExists(ctx, workerConfigPlaybookConfigMapName, workerConfigPlaybookConfigMapKey, workerConfigPlaybookTemplateFile, workerConfigPlaybookParams, instance)
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureWorkerConfigAnsibleConfigExists(ctx context.Context, instance *osbuildv1alpha1.OSBuildEnvConfig) (bool, error) {
+	return r.ensureConfigMapForTemplateFileExists(ctx, workerConfigAnsibleConfigConfigMapName, workerConfigAnsibleConfigConfigMapKey, workerConfigAnsibleConfigTemplateFile, nil, instance)
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureWorkerConfigInventoryExists(ctx context.Context, instance *osbuildv1alpha1.OSBuildEnvConfig, workerName, workerAddress, workerUser string) (bool, error) {
+	workerConfigInventoryParams := struct {
+		Address string
+		User    string
+		SSHKey  string
+	}{
+		Address: workerAddress,
+		User:    workerUser,
+		SSHKey:  path.Join(workerConfigJobSSHKeyDir, workerSSHKeysPrivateKeyKey),
+	}
+	return r.ensureConfigMapForTemplateFileExists(ctx, fmt.Sprintf(workerConfigInventoryConfigMapNameFormat, workerName), workerConfigInventoryConfigMapKey, workerConfigInventoryTemplateFile, workerConfigInventoryParams, instance)
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureOSBuildWorkerConfigExists(ctx context.Context, instance *osbuildv1alpha1.OSBuildEnvConfig) (bool, error) {
+	workerOSBuildWorkerConfigParams := struct {
+		CredentialsFile string
+		Bucket          string
+		GenericS3       *struct {
+			Region              string
+			Endpoint            string
+			CABundleFile        *string
+			SkipSSLVerification *bool
+		}
+	}{
+		CredentialsFile: workerOSBuildWorkerConfigS3CredentialsFile,
+	}
+
+	if instance.Spec.S3Service.AWS != nil {
+		workerOSBuildWorkerConfigParams.Bucket = instance.Spec.S3Service.AWS.Bucket
+	} else {
+		workerOSBuildWorkerConfigParams.Bucket = instance.Spec.S3Service.GenericS3.Bucket
+		workerOSBuildWorkerConfigParams.GenericS3 = &struct {
+			Region              string
+			Endpoint            string
+			CABundleFile        *string
+			SkipSSLVerification *bool
+		}{
+			Region:   instance.Spec.S3Service.GenericS3.Region,
+			Endpoint: instance.Spec.S3Service.GenericS3.Endpoint,
+		}
+		if instance.Spec.S3Service.GenericS3.CABundleSecretReference != nil {
+			caBundleFile := workerOSBuildWorkerConfigS3CABundleFile
+			workerOSBuildWorkerConfigParams.GenericS3.CABundleFile = &caBundleFile
+		}
+		if instance.Spec.S3Service.GenericS3.SkipSSLVerification != nil {
+			workerOSBuildWorkerConfigParams.GenericS3.SkipSSLVerification = instance.Spec.S3Service.GenericS3.SkipSSLVerification
+		}
+	}
+	return r.ensureConfigMapForTemplateFileExists(ctx, workerOSBuildWorkerConfigConfigMapName, workerOSBuildWorkerConfigConfigMapKey, workerOSBuildWorkerConfigTemplateFile, workerOSBuildWorkerConfigParams, instance)
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureWorkerSetupJobExists(ctx context.Context, instance *osbuildv1alpha1.OSBuildEnvConfig, workerName, workerSSHKeySecretName string) (bool, error) {
+	_, err := r.JobRepository.Read(ctx, fmt.Sprintf(workerConfigJobNameFormat, workerName), conf.GlobalConf.WorkingNamespace)
+	if err == nil {
+		return false, nil
+	}
+
+	if errors.IsNotFound(err) {
+		workerSetupJob, err := r.generateWorkerSetupJob(workerName, workerSSHKeySecretName, instance)
+		if err != nil {
+			return false, err
+		}
+
+		err = r.JobRepository.Create(ctx, workerSetupJob)
+		if err != nil {
+			return false, err
+		}
+
+		return true, nil
+	}
+
+	return false, err
+}
+
+func (r *OSBuildEnvConfigReconciler) generateWorkerSetupJob(workerName, workerSSHKeySecretName string, instance *osbuildv1alpha1.OSBuildEnvConfig) (*batchv1.Job, error) {
+	workerSetupJobParams := struct {
+		WorkerConfigJobNamespace               string
+		WorkerConfigJobName                    string
+		WorkerConfigJobImageName               string
+		WorkerConfigJobImageTag                string
+		WorkerConfigAnsibleConfigConfigMapKey  string
+		WorkerConfigInventoryConfigMapKey      string
+		WorkerConfigPlaybookConfigMapKey       string
+		WorkerConfigJobSSHKeyDir               string
+		RHCredentialsDir                       string
+		OSBuildWorkerCertsDir                  string
+		WorkerSSHKeysSecretName                string
+		WorkerConfigAnsibleConfigConfigMapName string
+		WorkerConfigPlaybookConfigMapName      string
+		WorkerConfigInventoryConfigMapName     string
+		RedHatCredsSecretName                  string
+		WorkerCertificateName                  string
+		WorkerOSBuildWorkerConfigConfigMapName string
+		OSBuildWorkerConfigDir                 string
+		OSBuildWorkerS3CredsDir                string
+		WorkerS3CredsSecretName                string
+	}{
+		WorkerConfigJobNamespace:               conf.GlobalConf.WorkingNamespace,
+		WorkerConfigJobName:                    fmt.Sprintf(workerConfigJobNameFormat, workerName),
+		WorkerConfigJobImageName:               conf.GlobalConf.WorkerSetupImageName,
+		WorkerConfigJobImageTag:                conf.GlobalConf.WorkerSetupImageTag,
+		WorkerConfigAnsibleConfigConfigMapKey:  workerConfigAnsibleConfigConfigMapKey,
+		WorkerConfigInventoryConfigMapKey:      workerConfigInventoryConfigMapKey,
+		WorkerConfigPlaybookConfigMapKey:       workerConfigPlaybookConfigMapKey,
+		WorkerConfigJobSSHKeyDir:               workerConfigJobSSHKeyDir,
+		RHCredentialsDir:                       workerRHCredentialsDir,
+		OSBuildWorkerCertsDir:                  workerOSBuildWorkerCertsDir,
+		WorkerSSHKeysSecretName:                workerSSHKeySecretName,
+		WorkerConfigAnsibleConfigConfigMapName: workerConfigAnsibleConfigConfigMapName,
+		WorkerConfigPlaybookConfigMapName:      workerConfigPlaybookConfigMapName,
+		WorkerConfigInventoryConfigMapName:     fmt.Sprintf(workerConfigInventoryConfigMapNameFormat, workerName),
+		RedHatCredsSecretName:                  instance.Spec.RedHatCredsSecretReference.Name,
+		WorkerCertificateName:                  fmt.Sprintf(workerCertificateNameFormat, workerName),
+		WorkerOSBuildWorkerConfigConfigMapName: workerOSBuildWorkerConfigConfigMapName,
+		OSBuildWorkerConfigDir:                 workerOSBuildWorkerConfigDir,
+		OSBuildWorkerS3CredsDir:                workerOSBuildWorkerS3CredsDir,
+	}
+
+	if instance.Spec.S3Service.AWS != nil {
+		workerSetupJobParams.WorkerS3CredsSecretName = instance.Spec.S3Service.AWS.CredsSecretReference.Name
+	} else {
+		workerSetupJobParams.WorkerS3CredsSecretName = instance.Spec.S3Service.GenericS3.CredsSecretReference.Name
+	}
+
+	buf, err := templates.LoadFromTemplateFile(workerSetupJobTemplateFile, workerSetupJobParams)
+	if err != nil {
+		return nil, err
+	}
+
+	decode := scheme.Codecs.UniversalDeserializer().Decode
+	obj, _, err := decode(buf.Bytes(), nil, nil)
+	if err != nil {
+		return nil, err
+
+	}
+
+	job, ok := obj.(*batchv1.Job)
+	if !ok {
+		return nil, fmt.Errorf("failed to deserialize the job object")
+	}
+
+	if instance.Spec.S3Service.GenericS3 != nil && instance.Spec.S3Service.GenericS3.CABundleSecretReference != nil {
+		caBundleSecretVolumeName := "s3-ca-bundle" // #nosec G101
+		caBundleSecretVolume := corev1.Volume{
+			Name: caBundleSecretVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{
+					SecretName: instance.Spec.S3Service.GenericS3.CABundleSecretReference.Name,
+				},
+			},
+		}
+		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, caBundleSecretVolume)
+
+		caBundleVolumeMount := corev1.VolumeMount{
+			Name:      caBundleSecretVolumeName,
+			MountPath: workerOSBuildWorkerS3CABundleDir,
+		}
+		job.Spec.Template.Spec.Containers[0].VolumeMounts = append(job.Spec.Template.Spec.Containers[0].VolumeMounts, caBundleVolumeMount)
+	}
+
+	return job, controllerutil.SetControllerReference(instance, job, r.Scheme)
 }
 
 func (r *OSBuildEnvConfigReconciler) Finalize(ctx context.Context, reqLogger logr.Logger, instance *osbuildv1alpha1.OSBuildEnvConfig) (ctrl.Result, error) {
@@ -513,6 +986,17 @@ func (r *OSBuildEnvConfigReconciler) Finalize(ctx context.Context, reqLogger log
 	if deleted {
 		reqLogger.Info("composer certificate secret was deleted")
 		return ctrl.Result{Requeue: true}, nil
+	}
+
+	for _, worker := range instance.Spec.Workers {
+		deleted, err = r.ensureWorkerCertSecretDeleted(ctx, worker.Name)
+		if err != nil {
+			return ctrl.Result{Requeue: true}, err
+		}
+		if deleted {
+			reqLogger.Info("Deleted certificate secret for", "worker", worker.Name)
+			return ctrl.Result{Requeue: true}, nil
+		}
 	}
 
 	err = r.removeFinalizer(ctx, reqLogger, instance)
@@ -533,6 +1017,10 @@ func (r *OSBuildEnvConfigReconciler) addFinalizer(ctx context.Context, instance 
 
 func (r *OSBuildEnvConfigReconciler) ensureComposerCertSecretDeleted(ctx context.Context) (bool, error) {
 	return r.ensureSecretDeleted(ctx, composerCertificateName)
+}
+
+func (r *OSBuildEnvConfigReconciler) ensureWorkerCertSecretDeleted(ctx context.Context, workerName string) (bool, error) {
+	return r.ensureSecretDeleted(ctx, fmt.Sprintf(workerCertificateNameFormat, workerName))
 }
 
 func (r *OSBuildEnvConfigReconciler) ensureSecretDeleted(ctx context.Context, secretName string) (bool, error) {
