@@ -13,4 +13,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: quay.io/bardielle/osbuild-operator
-  newTag: osbuil12
+  newTag: osbuil15

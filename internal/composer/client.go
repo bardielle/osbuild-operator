@@ -507,7 +507,7 @@ type ClientInterface interface {
 	PostCompose(ctx context.Context, body PostComposeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetComposeStatus request
-	GetComposeStatus(ctx context.Context, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetComposeStatus(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetComposeLogs request
 	GetComposeLogs(ctx context.Context, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -552,7 +552,7 @@ func (c *Client) PostCompose(ctx context.Context, body PostComposeJSONRequestBod
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetComposeStatus(ctx context.Context, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+func (c *Client) GetComposeStatus(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetComposeStatusRequest(c.Server, id)
 	if err != nil {
 		return nil, err
@@ -677,7 +677,7 @@ func NewPostComposeRequestWithBody(server string, contentType string, body io.Re
 }
 
 // NewGetComposeStatusRequest generates requests for GetComposeStatus
-func NewGetComposeStatusRequest(server string, id openapi_types.UUID) (*http.Request, error) {
+func NewGetComposeStatusRequest(server string, id string) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -985,7 +985,7 @@ type ClientWithResponsesInterface interface {
 	PostComposeWithResponse(ctx context.Context, body PostComposeJSONRequestBody, reqEditors ...RequestEditorFn) (*PostComposeResponse, error)
 
 	// GetComposeStatus request
-	GetComposeStatusWithResponse(ctx context.Context, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetComposeStatusResponse, error)
+	GetComposeStatusWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetComposeStatusResponse, error)
 
 	// GetComposeLogs request
 	GetComposeLogsWithResponse(ctx context.Context, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetComposeLogsResponse, error)
@@ -1223,7 +1223,7 @@ func (c *ClientWithResponses) PostComposeWithResponse(ctx context.Context, body 
 }
 
 // GetComposeStatusWithResponse request returning *GetComposeStatusResponse
-func (c *ClientWithResponses) GetComposeStatusWithResponse(ctx context.Context, id openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetComposeStatusResponse, error) {
+func (c *ClientWithResponses) GetComposeStatusWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetComposeStatusResponse, error) {
 	rsp, err := c.GetComposeStatus(ctx, id, reqEditors...)
 	if err != nil {
 		return nil, err
