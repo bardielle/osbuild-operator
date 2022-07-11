@@ -507,6 +507,7 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 	}
 }
 
+// //go:generate mockgen -source=generated_client.go -package=composer -destination=mock_osbuild_composer.go . ClientInterface
 // The interface specification for the client above.
 type ClientInterface interface {
 	// PostCompose request with any body
@@ -985,6 +986,7 @@ func WithBaseURL(baseURL string) ClientOption {
 	}
 }
 
+//go:generate mockgen -source=generated_client.go -package=composer -destination=mock_osbuild_composer.go . ClientWithResponsesInterface
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 	// PostCompose request with any body

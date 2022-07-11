@@ -133,7 +133,7 @@ endif
 generate: generate-tools controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 	go generate ./...
-
+	go generate mockgen internal/composer/ -source=generated_client.go -package=composer -destination=mock_osbuild_composer.go . ClientInterface
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...
