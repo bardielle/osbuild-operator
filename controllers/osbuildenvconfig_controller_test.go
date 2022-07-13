@@ -1,4 +1,4 @@
-package controllers_test
+package composer_test
 
 import (
 	"context"
@@ -34,8 +34,6 @@ import (
 	"github.com/project-flotta/osbuild-operator/internal/repository/osbuildenvconfig"
 	"github.com/project-flotta/osbuild-operator/internal/repository/secret"
 	"github.com/project-flotta/osbuild-operator/internal/repository/service"
-
-	"github.com/project-flotta/osbuild-operator/controllers"
 )
 
 var _ = Describe("OSBuildEnvConfig Controller", func() {
