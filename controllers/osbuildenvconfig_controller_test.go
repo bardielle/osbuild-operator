@@ -1,8 +1,9 @@
-package composer_test
+package controllers_test
 
 import (
 	"context"
 	"fmt"
+	"github.com/project-flotta/osbuild-operator/controllers"
 	"os"
 	"time"
 
